@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/kuldeep-joshi/raft-kv/internal/kvstore"
+	"github.com/KD-joshi/raft-kv/internal/kvstore"
 )
 
 func tempWAL(t *testing.T) (*WAL, string) {

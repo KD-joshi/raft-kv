@@ -20,8 +20,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kuldeep-joshi/raft-kv/internal/kvstore"
-	wal "github.com/kuldeep-joshi/raft-kv/internal/storage"
+	"github.com/KD-joshi/raft-kv/internal/kvstore"
+	wal "github.com/KD-joshi/raft-kv/internal/storage"
 )
 
 // Server holds the HTTP server, KV store, and WAL references.

@@ -1,3 +1,3 @@
-module github.com/kuldeep-joshi/raft-kv
+module github.com/KD-joshi/raft-kv
 
 go 1.23.2

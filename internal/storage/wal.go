@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kuldeep-joshi/raft-kv/internal/kvstore"
+	"github.com/KD-joshi/raft-kv/internal/kvstore"
 )
 
 // Entry represents a single WAL record.

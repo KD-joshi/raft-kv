@@ -23,9 +23,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kuldeep-joshi/raft-kv/internal/kvstore"
-	"github.com/kuldeep-joshi/raft-kv/internal/server"
-	wal "github.com/kuldeep-joshi/raft-kv/internal/storage"
+	"github.com/KD-joshi/raft-kv/internal/kvstore"
+	"github.com/KD-joshi/raft-kv/internal/server"
+	wal "github.com/KD-joshi/raft-kv/internal/storage"
 )
 
 func main() {
