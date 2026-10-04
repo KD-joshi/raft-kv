@@ -3,10 +3,10 @@
 // Phase 1: Single-node persistent KV store with REST API.
 //
 // This is the main entrypoint. It:
-//   1. Parses command-line flags (node ID, port, data directory)
-//   2. Opens the WAL file
-//   3. Replays WAL entries to rebuild in-memory state (crash recovery)
-//   4. Starts the HTTP server
+//  1. Parses command-line flags (node ID, port, data directory)
+//  2. Opens the WAL file
+//  3. Replays WAL entries to rebuild in-memory state (crash recovery)
+//  4. Starts the HTTP server
 //
 // Usage:
 //
@@ -20,18 +20,22 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/KD-joshi/raft-kv/internal/kvstore"
 	"github.com/KD-joshi/raft-kv/internal/server"
 	wal "github.com/KD-joshi/raft-kv/internal/storage"
+	"github.com/KD-joshi/raft-kv/internal/transport"
 )
 
 func main() {
 	// ── Parse flags ──
 	nodeID := flag.String("id", "node1", "Unique node identifier")
-	port := flag.Int("port", 8080, "HTTP server port")
+	httpPort := flag.Int("port", 8080, "HTTP server port (for clients)")
+	grpcPort := flag.Int("grpc-port", 9080, "gRPC server port (for node-to-node RPC)")
+	peersFlag := flag.String("peers", "", "Comma-separated list of peers (e.g. node2:9081,node3:9082)")
 	dataDir := flag.String("data-dir", "./data/node1", "Directory for WAL and snapshots")
 	flag.Parse()
 
@@ -39,10 +43,55 @@ func main() {
 
 	fmt.Println("╔══════════════════════════════════════════════════╗")
 	fmt.Println("║         raft-kv: Distributed Key-Value Store     ║")
-	fmt.Println("║         Phase 1: Single-Node Persistent Store    ║")
+	fmt.Println("║         Phase 2: RPC Networking (gRPC)           ║")
 	fmt.Println("╚══════════════════════════════════════════════════╝")
 	log.Printf("[%s] Starting node...", *nodeID)
 	log.Printf("[%s] Data directory: %s", *nodeID, *dataDir)
+
+	// ── 1. Start gRPC Server (Node-to-Node) ──
+	grpcAddr := fmt.Sprintf(":%d", *grpcPort)
+	grpcSrv, err := transport.StartGRPCServer(*nodeID, grpcAddr)
+	if err != nil {
+		log.Fatalf("[%s] FATAL: failed to start gRPC server: %v", *nodeID, err)
+	}
+	defer grpcSrv.GracefulStop()
+
+	// ── 2. Connect to Peers ──
+	var peers []*transport.Peer
+	if *peersFlag != "" {
+		peerAddrs := strings.Split(*peersFlag, ",")
+		for i, addr := range peerAddrs {
+			peerID := fmt.Sprintf("peer%d", i+1)
+
+			// We do this in a goroutine because Dial might block if peer isn't up yet
+			go func(pID, pAddr string) {
+				log.Printf("[%s] Attempting to connect to peer %s at %s...", *nodeID, pID, pAddr)
+
+				// gRPC handles reconnects automatically in the background
+				peer, err := transport.ConnectPeer(pID, pAddr)
+				if err != nil {
+					log.Printf("[%s] WARNING: could not connect to %s: %v", *nodeID, pID, err)
+					return
+				}
+				peers = append(peers, peer)
+				log.Printf("[%s] Connected to peer %s", *nodeID, pID)
+
+				// Start heartbeat loop for this peer
+				go func(p *transport.Peer) {
+					ticker := time.NewTicker(200 * time.Millisecond) // Ping every 200ms
+					defer ticker.Stop()
+					for range ticker.C {
+						// We send a ping; in Phase 3, this will be AppendEntries heartbeat
+						_, err := p.SendPing(*nodeID)
+						if err != nil {
+							// For Phase 2, we just log a debug message if ping fails
+							// log.Printf("[%s] Debug: ping to %s failed: %v", *nodeID, p.ID, err)
+						}
+					}
+				}(peer)
+			}(peerID, addr)
+		}
+	}
 
 	// ── Create data directory ──
 	if err := os.MkdirAll(*dataDir, 0755); err != nil {
@@ -82,11 +131,11 @@ func main() {
 		log.Printf("[%s] WAL is empty — starting fresh", *nodeID)
 	}
 
-	// ── Start HTTP server ──
-	addr := fmt.Sprintf(":%d", *port)
+	// ── Start HTTP server (Client-Facing) ──
+	httpAddr := fmt.Sprintf(":%d", *httpPort)
 	srv := server.New(server.Config{
 		NodeID:  *nodeID,
-		Addr:    addr,
+		Addr:    httpAddr,
 		DataDir: *dataDir,
 	}, store, walLog)
 

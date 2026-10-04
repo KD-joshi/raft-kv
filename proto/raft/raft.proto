@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package raft;
+
+option go_package = "github.com/KD-joshi/raft-kv/proto/raft";
+
+// ── Phase 2: Simple RPC Networking ──
+
+// PingRequest is a simple heartbeat message sent between nodes.
+message PingRequest {
+  string sender_id = 1; // ID of the node sending the ping (e.g., "node1")
+}
+
+// PingResponse is the acknowledgment.
+message PingResponse {
+  string receiver_id = 1; // ID of the node replying (e.g., "node2")
+  bool success = 2;       // Always true for now
+}
+
+// RaftService defines the RPCs that nodes use to communicate.
+service RaftService {
+  // Ping is a simple heartbeat to prove connectivity.
+  rpc Ping (PingRequest) returns (PingResponse);
+}
