@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/KD-joshi/raft-kv/internal/kvstore"
+	"github.com/KD-joshi/raft-kv/internal/raft"
 	"github.com/KD-joshi/raft-kv/internal/server"
 	wal "github.com/KD-joshi/raft-kv/internal/storage"
 	"github.com/KD-joshi/raft-kv/internal/transport"
@@ -48,9 +49,12 @@ func main() {
 	log.Printf("[%s] Starting node...", *nodeID)
 	log.Printf("[%s] Data directory: %s", *nodeID, *dataDir)
 
+	// ── 0. Create Raft Node ──
+	raftNode := raft.NewNode(*nodeID)
+
 	// ── 1. Start gRPC Server (Node-to-Node) ──
 	grpcAddr := fmt.Sprintf(":%d", *grpcPort)
-	grpcSrv, err := transport.StartGRPCServer(*nodeID, grpcAddr)
+	grpcSrv, err := transport.StartGRPCServer(*nodeID, grpcAddr, raftNode)
 	if err != nil {
 		log.Fatalf("[%s] FATAL: failed to start gRPC server: %v", *nodeID, err)
 	}
@@ -63,35 +67,22 @@ func main() {
 		for i, addr := range peerAddrs {
 			peerID := fmt.Sprintf("peer%d", i+1)
 
-			// We do this in a goroutine because Dial might block if peer isn't up yet
-			go func(pID, pAddr string) {
-				log.Printf("[%s] Attempting to connect to peer %s at %s...", *nodeID, pID, pAddr)
+			log.Printf("[%s] Attempting to connect to peer %s at %s...", *nodeID, peerID, addr)
 
-				// gRPC handles reconnects automatically in the background
-				peer, err := transport.ConnectPeer(pID, pAddr)
-				if err != nil {
-					log.Printf("[%s] WARNING: could not connect to %s: %v", *nodeID, pID, err)
-					return
-				}
-				peers = append(peers, peer)
-				log.Printf("[%s] Connected to peer %s", *nodeID, pID)
-
-				// Start heartbeat loop for this peer
-				go func(p *transport.Peer) {
-					ticker := time.NewTicker(200 * time.Millisecond) // Ping every 200ms
-					defer ticker.Stop()
-					for range ticker.C {
-						// We send a ping; in Phase 3, this will be AppendEntries heartbeat
-						_, err := p.SendPing(*nodeID)
-						if err != nil {
-							// For Phase 2, we just log a debug message if ping fails
-							// log.Printf("[%s] Debug: ping to %s failed: %v", *nodeID, p.ID, err)
-						}
-					}
-				}(peer)
-			}(peerID, addr)
+			// We don't block here, gRPC handles reconnects in the background
+			peer, err := transport.ConnectPeer(peerID, addr)
+			if err != nil {
+				log.Printf("[%s] WARNING: could not connect to %s: %v", *nodeID, peerID, err)
+				continue
+			}
+			peers = append(peers, peer)
+			log.Printf("[%s] Connected to peer %s", *nodeID, peerID)
 		}
 	}
+
+	// ── 3. Start Raft Consensus Loop ──
+	raftNode.SetPeers(peers)
+	raftNode.Run()
 
 	// ── Create data directory ──
 	if err := os.MkdirAll(*dataDir, 0755); err != nil {

@@ -11,16 +11,27 @@ import (
 	"google.golang.org/grpc"
 )
 
+// RaftHandler is an interface to break the circular dependency between transport and raft packages.
+// In a larger app, we'd define this in a separate interface package, but here it works nicely.
+type RaftHandler interface {
+	HandleRequestVote(req *raft.RequestVoteRequest) *raft.RequestVoteResponse
+	ResetElectionTimer()
+}
+
 // RaftGRPCServer implements the RaftService gRPC interface.
 type RaftGRPCServer struct {
 	raft.UnimplementedRaftServiceServer
-	nodeID string
+	nodeID  string
+	handler RaftHandler
 }
 
 // Ping is a simple heartbeat receiver.
 func (s *RaftGRPCServer) Ping(ctx context.Context, req *raft.PingRequest) (*raft.PingResponse, error) {
-	// For Phase 2, just log that we received a ping.
-	log.Printf("[%s] Received Ping from %s", s.nodeID, req.SenderId)
+	// Let the Raft node know we heard from the leader
+	s.handler.ResetElectionTimer()
+	
+	// Comment out the log so it doesn't spam the console 5 times a second
+	// log.Printf("[%s] Received Ping from %s", s.nodeID, req.SenderId)
 
 	return &raft.PingResponse{
 		ReceiverId: s.nodeID,
@@ -28,8 +39,14 @@ func (s *RaftGRPCServer) Ping(ctx context.Context, req *raft.PingRequest) (*raft
 	}, nil
 }
 
+// RequestVote handles an incoming election vote request.
+func (s *RaftGRPCServer) RequestVote(ctx context.Context, req *raft.RequestVoteRequest) (*raft.RequestVoteResponse, error) {
+	resp := s.handler.HandleRequestVote(req)
+	return resp, nil
+}
+
 // StartGRPCServer initializes and starts a gRPC server on the given address.
-func StartGRPCServer(nodeID, addr string) (*grpc.Server, error) {
+func StartGRPCServer(nodeID, addr string, handler RaftHandler) (*grpc.Server, error) {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen on %s: %w", addr, err)
@@ -38,7 +55,8 @@ func StartGRPCServer(nodeID, addr string) (*grpc.Server, error) {
 	grpcServer := grpc.NewServer()
 	
 	raftServer := &RaftGRPCServer{
-		nodeID: nodeID,
+		nodeID:  nodeID,
+		handler: handler,
 	}
 
 	// Register our implementation with the generated gRPC server code

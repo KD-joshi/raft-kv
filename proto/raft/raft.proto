@@ -17,8 +17,24 @@ message PingResponse {
   bool success = 2;       // Always true for now
 }
 
+// RequestVoteRequest is sent by Candidates to gather votes.
+message RequestVoteRequest {
+  uint64 term = 1;          // Candidate's term
+  string candidate_id = 2;  // Candidate requesting vote
+}
+
+// RequestVoteResponse is sent by nodes in response to a vote request.
+message RequestVoteResponse {
+  uint64 term = 1;          // Current term, for candidate to update itself
+  bool vote_granted = 2;    // True means candidate received vote
+}
+
 // RaftService defines the RPCs that nodes use to communicate.
 service RaftService {
-  // Ping is a simple heartbeat to prove connectivity.
+  // Ping is a simple heartbeat to prove connectivity (Phase 2).
+  // In Phase 4, we will replace this with the true AppendEntries RPC.
   rpc Ping (PingRequest) returns (PingResponse);
+
+  // RequestVote is sent by candidates to gather votes (Phase 3).
+  rpc RequestVote (RequestVoteRequest) returns (RequestVoteResponse);
 }

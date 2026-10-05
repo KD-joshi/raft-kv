@@ -119,6 +119,112 @@ func (x *PingResponse) GetSuccess() bool {
 	return false
 }
 
+// RequestVoteRequest is sent by Candidates to gather votes.
+type RequestVoteRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Term          uint64                 `protobuf:"varint,1,opt,name=term,proto3" json:"term,omitempty"`                                 // Candidate's term
+	CandidateId   string                 `protobuf:"bytes,2,opt,name=candidate_id,json=candidateId,proto3" json:"candidate_id,omitempty"` // Candidate requesting vote
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RequestVoteRequest) Reset() {
+	*x = RequestVoteRequest{}
+	mi := &file_proto_raft_raft_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RequestVoteRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RequestVoteRequest) ProtoMessage() {}
+
+func (x *RequestVoteRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_raft_raft_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RequestVoteRequest.ProtoReflect.Descriptor instead.
+func (*RequestVoteRequest) Descriptor() ([]byte, []int) {
+	return file_proto_raft_raft_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *RequestVoteRequest) GetTerm() uint64 {
+	if x != nil {
+		return x.Term
+	}
+	return 0
+}
+
+func (x *RequestVoteRequest) GetCandidateId() string {
+	if x != nil {
+		return x.CandidateId
+	}
+	return ""
+}
+
+// RequestVoteResponse is sent by nodes in response to a vote request.
+type RequestVoteResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Term          uint64                 `protobuf:"varint,1,opt,name=term,proto3" json:"term,omitempty"`                                  // Current term, for candidate to update itself
+	VoteGranted   bool                   `protobuf:"varint,2,opt,name=vote_granted,json=voteGranted,proto3" json:"vote_granted,omitempty"` // True means candidate received vote
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RequestVoteResponse) Reset() {
+	*x = RequestVoteResponse{}
+	mi := &file_proto_raft_raft_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RequestVoteResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RequestVoteResponse) ProtoMessage() {}
+
+func (x *RequestVoteResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_raft_raft_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RequestVoteResponse.ProtoReflect.Descriptor instead.
+func (*RequestVoteResponse) Descriptor() ([]byte, []int) {
+	return file_proto_raft_raft_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *RequestVoteResponse) GetTerm() uint64 {
+	if x != nil {
+		return x.Term
+	}
+	return 0
+}
+
+func (x *RequestVoteResponse) GetVoteGranted() bool {
+	if x != nil {
+		return x.VoteGranted
+	}
+	return false
+}
+
 var File_proto_raft_raft_proto protoreflect.FileDescriptor
 
 const file_proto_raft_raft_proto_rawDesc = "" +
@@ -129,9 +235,16 @@ const file_proto_raft_raft_proto_rawDesc = "" +
 	"\fPingResponse\x12\x1f\n" +
 	"\vreceiver_id\x18\x01 \x01(\tR\n" +
 	"receiverId\x12\x18\n" +
-	"\asuccess\x18\x02 \x01(\bR\asuccess2<\n" +
+	"\asuccess\x18\x02 \x01(\bR\asuccess\"K\n" +
+	"\x12RequestVoteRequest\x12\x12\n" +
+	"\x04term\x18\x01 \x01(\x04R\x04term\x12!\n" +
+	"\fcandidate_id\x18\x02 \x01(\tR\vcandidateId\"L\n" +
+	"\x13RequestVoteResponse\x12\x12\n" +
+	"\x04term\x18\x01 \x01(\x04R\x04term\x12!\n" +
+	"\fvote_granted\x18\x02 \x01(\bR\vvoteGranted2\x80\x01\n" +
 	"\vRaftService\x12-\n" +
-	"\x04Ping\x12\x11.raft.PingRequest\x1a\x12.raft.PingResponseB(Z&github.com/KD-joshi/raft-kv/proto/raftb\x06proto3"
+	"\x04Ping\x12\x11.raft.PingRequest\x1a\x12.raft.PingResponse\x12B\n" +
+	"\vRequestVote\x12\x18.raft.RequestVoteRequest\x1a\x19.raft.RequestVoteResponseB(Z&github.com/KD-joshi/raft-kv/proto/raftb\x06proto3"
 
 var (
 	file_proto_raft_raft_proto_rawDescOnce sync.Once
@@ -145,16 +258,20 @@ func file_proto_raft_raft_proto_rawDescGZIP() []byte {
 	return file_proto_raft_raft_proto_rawDescData
 }
 
-var file_proto_raft_raft_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_proto_raft_raft_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_proto_raft_raft_proto_goTypes = []any{
-	(*PingRequest)(nil),  // 0: raft.PingRequest
-	(*PingResponse)(nil), // 1: raft.PingResponse
+	(*PingRequest)(nil),         // 0: raft.PingRequest
+	(*PingResponse)(nil),        // 1: raft.PingResponse
+	(*RequestVoteRequest)(nil),  // 2: raft.RequestVoteRequest
+	(*RequestVoteResponse)(nil), // 3: raft.RequestVoteResponse
 }
 var file_proto_raft_raft_proto_depIdxs = []int32{
 	0, // 0: raft.RaftService.Ping:input_type -> raft.PingRequest
-	1, // 1: raft.RaftService.Ping:output_type -> raft.PingResponse
-	1, // [1:2] is the sub-list for method output_type
-	0, // [0:1] is the sub-list for method input_type
+	2, // 1: raft.RaftService.RequestVote:input_type -> raft.RequestVoteRequest
+	1, // 2: raft.RaftService.Ping:output_type -> raft.PingResponse
+	3, // 3: raft.RaftService.RequestVote:output_type -> raft.RequestVoteResponse
+	2, // [2:4] is the sub-list for method output_type
+	0, // [0:2] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
@@ -171,7 +288,7 @@ func file_proto_raft_raft_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_raft_raft_proto_rawDesc), len(file_proto_raft_raft_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

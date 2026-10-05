@@ -19,7 +19,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	RaftService_Ping_FullMethodName = "/raft.RaftService/Ping"
+	RaftService_Ping_FullMethodName        = "/raft.RaftService/Ping"
+	RaftService_RequestVote_FullMethodName = "/raft.RaftService/RequestVote"
 )
 
 // RaftServiceClient is the client API for RaftService service.
@@ -28,8 +29,11 @@ const (
 //
 // RaftService defines the RPCs that nodes use to communicate.
 type RaftServiceClient interface {
-	// Ping is a simple heartbeat to prove connectivity.
+	// Ping is a simple heartbeat to prove connectivity (Phase 2).
+	// In Phase 4, we will replace this with the true AppendEntries RPC.
 	Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PingResponse, error)
+	// RequestVote is sent by candidates to gather votes (Phase 3).
+	RequestVote(ctx context.Context, in *RequestVoteRequest, opts ...grpc.CallOption) (*RequestVoteResponse, error)
 }
 
 type raftServiceClient struct {
@@ -50,14 +54,27 @@ func (c *raftServiceClient) Ping(ctx context.Context, in *PingRequest, opts ...g
 	return out, nil
 }
 
+func (c *raftServiceClient) RequestVote(ctx context.Context, in *RequestVoteRequest, opts ...grpc.CallOption) (*RequestVoteResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RequestVoteResponse)
+	err := c.cc.Invoke(ctx, RaftService_RequestVote_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RaftServiceServer is the server API for RaftService service.
 // All implementations must embed UnimplementedRaftServiceServer
 // for forward compatibility.
 //
 // RaftService defines the RPCs that nodes use to communicate.
 type RaftServiceServer interface {
-	// Ping is a simple heartbeat to prove connectivity.
+	// Ping is a simple heartbeat to prove connectivity (Phase 2).
+	// In Phase 4, we will replace this with the true AppendEntries RPC.
 	Ping(context.Context, *PingRequest) (*PingResponse, error)
+	// RequestVote is sent by candidates to gather votes (Phase 3).
+	RequestVote(context.Context, *RequestVoteRequest) (*RequestVoteResponse, error)
 	mustEmbedUnimplementedRaftServiceServer()
 }
 
@@ -70,6 +87,9 @@ type UnimplementedRaftServiceServer struct{}
 
 func (UnimplementedRaftServiceServer) Ping(context.Context, *PingRequest) (*PingResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Ping not implemented")
+}
+func (UnimplementedRaftServiceServer) RequestVote(context.Context, *RequestVoteRequest) (*RequestVoteResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RequestVote not implemented")
 }
 func (UnimplementedRaftServiceServer) mustEmbedUnimplementedRaftServiceServer() {}
 func (UnimplementedRaftServiceServer) testEmbeddedByValue()                     {}
@@ -110,6 +130,24 @@ func _RaftService_Ping_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RaftService_RequestVote_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RequestVoteRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftServiceServer).RequestVote(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RaftService_RequestVote_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftServiceServer).RequestVote(ctx, req.(*RequestVoteRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RaftService_ServiceDesc is the grpc.ServiceDesc for RaftService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -120,6 +158,10 @@ var RaftService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Ping",
 			Handler:    _RaftService_Ping_Handler,
+		},
+		{
+			MethodName: "RequestVote",
+			Handler:    _RaftService_RequestVote_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
