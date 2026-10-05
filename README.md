@@ -25,6 +25,18 @@ This codebase serves as a functional demonstration of the mechanisms that power 
 This implementation enforces strict consistency and high availability guarantees, proven by load testing:
 
 * **High Throughput Consensus:** Achieved **~600 Writes Per Second (RPS)** across a 3-node cluster with 100 concurrent workers (including network RPC overhead and disk `fsync` time). Average write latency is **~170ms** under heavy load.
+
+  ```text
+  ========================================
+  BENCHMARK RESULTS (Raft 2-Phase Commits)
+  ========================================
+  Total Time:      17.31s
+  Successful:      10000
+  Errors:          0
+  Throughput:      577.57 Requests / Second
+  Average Latency: 170.93ms
+  ========================================
+  ```
 * **Zero Data Loss (Durability):** 100% of successful writes are guaranteed to be `fsync`'d to the disk on a Quorum (majority) of nodes before a `200 OK` is returned to the client.
 * **Rapid Failover:** If the Leader crashes, the cluster detects the failure and elects a new Leader in **150ms - 300ms**, resulting in near-zero downtime.
 * **Fault Tolerance:** Operates perfectly with `(N/2) + 1` nodes. A 3-node cluster can sustain complete server failure with 0% downtime and 0 bytes of data lost.
