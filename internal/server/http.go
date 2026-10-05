@@ -1,15 +1,15 @@
 // Package server implements the HTTP REST API layer for the KV store.
 //
-// This is the client-facing interface:
-//   - PUT /key?val=value  → Write a key-value pair
-//   - GET /key            → Read a value by key
-//   - DELETE /key         → Delete a key
-//   - GET /health         → Health check + node status
-//   - GET /keys           → List all keys (debug)
-//   - GET /metrics        → Prometheus-compatible metrics endpoint
+// Routes:
+//   - PUT /kv/{key}?val={value}  → Write a key-value pair (routed through Raft)
+//   - GET /kv/{key}              → Read a value by key (served locally)
+//   - DELETE /kv/{key}           → Delete a key (routed through Raft)
+//   - GET /health                → Health check + node status
+//   - GET /keys                  → List all keys (debug)
+//   - GET /metrics               → Prometheus-compatible metrics endpoint
 //
-// In Phase 4, writes will be routed through the Raft leader.
-// If this node is not the leader, PUT/DELETE will return a redirect.
+// If this node is NOT the leader, PUT/DELETE will return an HTTP redirect
+// telling the client which node is the current leader.
 package server
 
 import (
@@ -21,44 +21,54 @@ import (
 	"time"
 
 	"github.com/KD-joshi/raft-kv/internal/kvstore"
+	"github.com/KD-joshi/raft-kv/internal/raft"
 	wal "github.com/KD-joshi/raft-kv/internal/storage"
 )
 
 // Server holds the HTTP server, KV store, and WAL references.
 type Server struct {
-	store  *kvstore.Store
-	wal    *wal.WAL
-	nodeID string
-	addr   string
-	mux    *http.ServeMux
-	start  time.Time
+	store    *kvstore.Store
+	wal      *wal.WAL
+	raftNode *raft.Node
+	nodeID   string
+	addr     string
+	mux      *http.ServeMux
+	start    time.Time
+
+	// peerHTTPAddrs maps peer nodeIDs to their HTTP addresses for redirects.
+	// e.g. {"node1": "localhost:8001", "node2": "localhost:8002"}
+	peerHTTPAddrs map[string]string
 }
 
 // Config holds server configuration.
 type Config struct {
-	NodeID  string // Unique identifier for this node (e.g., "node1")
-	Addr    string // Listen address (e.g., ":8080")
-	DataDir string // Directory for WAL and snapshots
+	NodeID        string            // Unique identifier for this node (e.g., "node1")
+	Addr          string            // Listen address (e.g., ":8080")
+	DataDir       string            // Directory for WAL and snapshots
+	PeerHTTPAddrs map[string]string // Map of nodeID -> HTTP address
 }
 
 // APIResponse is the standard JSON response envelope.
 type APIResponse struct {
-	Success bool   `json:"success"`
-	Key     string `json:"key,omitempty"`
-	Value   string `json:"value,omitempty"`
-	Message string `json:"message,omitempty"`
-	NodeID  string `json:"node_id"`
+	Success  bool   `json:"success"`
+	Key      string `json:"key,omitempty"`
+	Value    string `json:"value,omitempty"`
+	Message  string `json:"message,omitempty"`
+	NodeID   string `json:"node_id"`
+	LeaderID string `json:"leader_id,omitempty"`
 }
 
 // New creates a new HTTP server with all routes registered.
-func New(cfg Config, store *kvstore.Store, walLog *wal.WAL) *Server {
+func New(cfg Config, store *kvstore.Store, walLog *wal.WAL, raftNode *raft.Node) *Server {
 	s := &Server{
-		store:  store,
-		wal:    walLog,
-		nodeID: cfg.NodeID,
-		addr:   cfg.Addr,
-		mux:    http.NewServeMux(),
-		start:  time.Now(),
+		store:         store,
+		wal:           walLog,
+		raftNode:      raftNode,
+		nodeID:        cfg.NodeID,
+		addr:          cfg.Addr,
+		mux:           http.NewServeMux(),
+		start:         time.Now(),
+		peerHTTPAddrs: cfg.PeerHTTPAddrs,
 	}
 
 	s.registerRoutes()
@@ -67,19 +77,10 @@ func New(cfg Config, store *kvstore.Store, walLog *wal.WAL) *Server {
 
 // registerRoutes sets up all HTTP handlers.
 func (s *Server) registerRoutes() {
-	// KV operations — route by HTTP method
 	s.mux.HandleFunc("/kv/", s.handleKV)
-
-	// Health check
 	s.mux.HandleFunc("/health", s.handleHealth)
-
-	// Debug: list all keys
 	s.mux.HandleFunc("/keys", s.handleKeys)
-
-	// Prometheus metrics
 	s.mux.HandleFunc("/metrics", s.handleMetrics)
-
-	// Root
 	s.mux.HandleFunc("/", s.handleRoot)
 }
 
@@ -108,10 +109,7 @@ func (s *Server) withLogging(next http.Handler) http.Handler {
 
 // ─── KV Handler ────────────────────────────────────────────────
 
-// handleKV dispatches to PUT, GET, or DELETE based on HTTP method.
-// URL pattern: /kv/{key}
 func (s *Server) handleKV(w http.ResponseWriter, r *http.Request) {
-	// Extract key from URL path: /kv/mykey → "mykey"
 	key := strings.TrimPrefix(r.URL.Path, "/kv/")
 	key = strings.TrimSpace(key)
 
@@ -133,16 +131,14 @@ func (s *Server) handleKV(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handlePut writes a key-value pair.
-// Flow: Validate → WAL write (fsync) → Apply to KV store → Respond
+// handlePut writes a key-value pair via the Raft consensus pipeline.
 //
-// The order is critical for crash safety:
-//   1. WAL first (persisted to disk)
-//   2. KV store second (in-memory)
-//   3. Response to client (only after both succeed)
-//
-// If we crash between 1 and 2, replay will re-apply the command.
-// If we crash before 1, the client never got a success response.
+// Flow:
+//  1. If not the leader → respond with a redirect to the leader
+//  2. Propose the command to the Raft log
+//  3. Raft replicates to a quorum of followers
+//  4. Once committed, the applyLoop applies it to the KV store
+//  5. Respond 200 OK to the client
 func (s *Server) handlePut(w http.ResponseWriter, r *http.Request, key string) {
 	val := r.URL.Query().Get("val")
 	if val == "" {
@@ -156,32 +152,29 @@ func (s *Server) handlePut(w http.ResponseWriter, r *http.Request, key string) {
 		Value: val,
 	}
 
-	// Step 1: Write to WAL (crash safety)
-	idx, err := s.wal.Append(cmd)
+	// Route through Raft consensus
+	err := s.raftNode.Propose(cmd, 5*time.Second)
 	if err != nil {
-		s.respondError(w, http.StatusInternalServerError, fmt.Sprintf("WAL write failed: %v", err))
+		if err == raft.ErrNotLeader {
+			s.redirectToLeader(w, r)
+			return
+		}
+		s.respondError(w, http.StatusInternalServerError, fmt.Sprintf("consensus failed: %v", err))
 		return
 	}
 
-	// Step 2: Apply to in-memory store
-	_, err = s.store.Apply(cmd)
-	if err != nil {
-		s.respondError(w, http.StatusInternalServerError, fmt.Sprintf("apply failed: %v", err))
-		return
-	}
-
-	log.Printf("[%s] PUT key=%q val=%q wal_idx=%d", s.nodeID, key, val, idx)
+	log.Printf("[%s] PUT key=%q val=%q (committed via Raft)", s.nodeID, key, val)
 
 	s.respondJSON(w, http.StatusOK, APIResponse{
 		Success: true,
 		Key:     key,
 		Value:   val,
-		Message: fmt.Sprintf("stored at WAL index %d", idx),
+		Message: "committed via Raft consensus",
 		NodeID:  s.nodeID,
 	})
 }
 
-// handleGet reads a value by key.
+// handleGet reads a value by key. Served locally (reads don't need consensus).
 func (s *Server) handleGet(w http.ResponseWriter, r *http.Request, key string) {
 	val, exists := s.store.Get(key)
 
@@ -203,50 +196,71 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request, key string) {
 	})
 }
 
-// handleDelete removes a key.
-// Same flow as PUT: WAL → Apply → Respond.
+// handleDelete removes a key via the Raft consensus pipeline.
 func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request, key string) {
 	cmd := kvstore.Command{
 		Op:  "DELETE",
 		Key: key,
 	}
 
-	// Step 1: WAL
-	_, err := s.wal.Append(cmd)
+	err := s.raftNode.Propose(cmd, 5*time.Second)
 	if err != nil {
-		s.respondError(w, http.StatusInternalServerError, fmt.Sprintf("WAL write failed: %v", err))
+		if err == raft.ErrNotLeader {
+			s.redirectToLeader(w, r)
+			return
+		}
+		s.respondError(w, http.StatusInternalServerError, fmt.Sprintf("consensus failed: %v", err))
 		return
 	}
 
-	// Step 2: Apply
-	_, err = s.store.Apply(cmd)
-	if err != nil {
-		s.respondError(w, http.StatusInternalServerError, fmt.Sprintf("apply failed: %v", err))
-		return
-	}
-
-	log.Printf("[%s] DELETE key=%q", s.nodeID, key)
+	log.Printf("[%s] DELETE key=%q (committed via Raft)", s.nodeID, key)
 
 	s.respondJSON(w, http.StatusOK, APIResponse{
 		Success: true,
 		Key:     key,
-		Message: "deleted",
+		Message: "deleted via Raft consensus",
 		NodeID:  s.nodeID,
+	})
+}
+
+// redirectToLeader sends a JSON response telling the client who the leader is.
+func (s *Server) redirectToLeader(w http.ResponseWriter, r *http.Request) {
+	leaderID := s.raftNode.LeaderID()
+	msg := "not the leader"
+	if leaderID != "" {
+		msg = fmt.Sprintf("not the leader, try node %s", leaderID)
+		// If we know the leader's HTTP address, provide it
+		if addr, ok := s.peerHTTPAddrs[leaderID]; ok {
+			msg = fmt.Sprintf("not the leader, redirect to http://%s%s", addr, r.URL.String())
+		}
+	}
+
+	s.respondJSON(w, http.StatusTemporaryRedirect, APIResponse{
+		Success:  false,
+		Message:  msg,
+		NodeID:   s.nodeID,
+		LeaderID: leaderID,
 	})
 }
 
 // ─── Utility Endpoints ────────────────────────────────────────
 
-// handleHealth returns node status for monitoring.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	puts, gets, deletes := s.store.Stats()
 	walEntries, walFsyncs, walBytes := s.wal.Stats()
+	state, term := s.raftNode.GetState()
 
 	resp := map[string]interface{}{
 		"status":      "healthy",
 		"node_id":     s.nodeID,
 		"uptime":      time.Since(s.start).String(),
 		"keys_stored": s.store.Len(),
+		"raft": map[string]interface{}{
+			"state":     state.String(),
+			"term":      term,
+			"leader_id": s.raftNode.LeaderID(),
+			"is_leader": s.raftNode.IsLeader(),
+		},
 		"store_stats": map[string]uint64{
 			"puts":    puts,
 			"gets":    gets,
@@ -263,7 +277,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-// handleKeys lists all keys in the store (for debugging).
 func (s *Server) handleKeys(w http.ResponseWriter, r *http.Request) {
 	keys := s.store.Keys()
 
@@ -276,20 +289,11 @@ func (s *Server) handleKeys(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-// handleMetrics exposes Prometheus-compatible metrics.
-// Prometheus scrapes this endpoint periodically.
-//
-// Metrics exposed:
-//   - raftkv_store_operations_total{op="put|get|delete"}
-//   - raftkv_store_keys_total
-//   - raftkv_wal_entries_total
-//   - raftkv_wal_fsyncs_total
-//   - raftkv_wal_bytes_total
-//   - raftkv_uptime_seconds
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	puts, gets, deletes := s.store.Stats()
 	walEntries, walFsyncs, walBytes := s.wal.Stats()
 	uptime := time.Since(s.start).Seconds()
+	state, term := s.raftNode.GetState()
 
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 
@@ -318,24 +322,38 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "# HELP raftkv_uptime_seconds Node uptime in seconds.\n")
 	fmt.Fprintf(w, "# TYPE raftkv_uptime_seconds gauge\n")
 	fmt.Fprintf(w, "raftkv_uptime_seconds{node=\"%s\"} %.2f\n", s.nodeID, uptime)
+	fmt.Fprintf(w, "\n")
+	fmt.Fprintf(w, "# HELP raftkv_raft_state Current Raft state (0=Follower, 1=Candidate, 2=Leader).\n")
+	fmt.Fprintf(w, "# TYPE raftkv_raft_state gauge\n")
+	fmt.Fprintf(w, "raftkv_raft_state{node=\"%s\"} %d\n", s.nodeID, state)
+	fmt.Fprintf(w, "\n")
+	fmt.Fprintf(w, "# HELP raftkv_raft_term Current Raft term.\n")
+	fmt.Fprintf(w, "# TYPE raftkv_raft_term gauge\n")
+	fmt.Fprintf(w, "raftkv_raft_term{node=\"%s\"} %d\n", s.nodeID, term)
 }
 
-// handleRoot shows a welcome message with API docs.
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
 	}
 
+	state, term := s.raftNode.GetState()
+
 	resp := map[string]interface{}{
 		"name":    "raft-kv",
 		"node_id": s.nodeID,
-		"version": "0.1.0 (Phase 1: Single-Node KV Store)",
+		"version": "0.4.0 (Phase 4: Distributed Consensus)",
+		"raft": map[string]interface{}{
+			"state":     state.String(),
+			"term":      term,
+			"leader_id": s.raftNode.LeaderID(),
+		},
 		"endpoints": map[string]string{
-			"PUT /kv/{key}?val={value}": "Set a key-value pair",
+			"PUT /kv/{key}?val={value}": "Set a key-value pair (routed through Raft leader)",
 			"GET /kv/{key}":            "Get a value by key",
-			"DELETE /kv/{key}":         "Delete a key",
-			"GET /health":             "Health check with stats",
+			"DELETE /kv/{key}":         "Delete a key (routed through Raft leader)",
+			"GET /health":             "Health check with Raft state",
 			"GET /keys":               "List all keys",
 			"GET /metrics":            "Prometheus metrics",
 		},

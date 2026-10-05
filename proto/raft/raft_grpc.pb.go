@@ -19,8 +19,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	RaftService_Ping_FullMethodName        = "/raft.RaftService/Ping"
-	RaftService_RequestVote_FullMethodName = "/raft.RaftService/RequestVote"
+	RaftService_AppendEntries_FullMethodName = "/raft.RaftService/AppendEntries"
+	RaftService_RequestVote_FullMethodName   = "/raft.RaftService/RequestVote"
 )
 
 // RaftServiceClient is the client API for RaftService service.
@@ -29,10 +29,9 @@ const (
 //
 // RaftService defines the RPCs that nodes use to communicate.
 type RaftServiceClient interface {
-	// Ping is a simple heartbeat to prove connectivity (Phase 2).
-	// In Phase 4, we will replace this with the true AppendEntries RPC.
-	Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PingResponse, error)
-	// RequestVote is sent by candidates to gather votes (Phase 3).
+	// AppendEntries replicates log entries and serves as heartbeat.
+	AppendEntries(ctx context.Context, in *AppendEntriesRequest, opts ...grpc.CallOption) (*AppendEntriesResponse, error)
+	// RequestVote is sent by candidates to gather votes.
 	RequestVote(ctx context.Context, in *RequestVoteRequest, opts ...grpc.CallOption) (*RequestVoteResponse, error)
 }
 
@@ -44,10 +43,10 @@ func NewRaftServiceClient(cc grpc.ClientConnInterface) RaftServiceClient {
 	return &raftServiceClient{cc}
 }
 
-func (c *raftServiceClient) Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PingResponse, error) {
+func (c *raftServiceClient) AppendEntries(ctx context.Context, in *AppendEntriesRequest, opts ...grpc.CallOption) (*AppendEntriesResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(PingResponse)
-	err := c.cc.Invoke(ctx, RaftService_Ping_FullMethodName, in, out, cOpts...)
+	out := new(AppendEntriesResponse)
+	err := c.cc.Invoke(ctx, RaftService_AppendEntries_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -70,10 +69,9 @@ func (c *raftServiceClient) RequestVote(ctx context.Context, in *RequestVoteRequ
 //
 // RaftService defines the RPCs that nodes use to communicate.
 type RaftServiceServer interface {
-	// Ping is a simple heartbeat to prove connectivity (Phase 2).
-	// In Phase 4, we will replace this with the true AppendEntries RPC.
-	Ping(context.Context, *PingRequest) (*PingResponse, error)
-	// RequestVote is sent by candidates to gather votes (Phase 3).
+	// AppendEntries replicates log entries and serves as heartbeat.
+	AppendEntries(context.Context, *AppendEntriesRequest) (*AppendEntriesResponse, error)
+	// RequestVote is sent by candidates to gather votes.
 	RequestVote(context.Context, *RequestVoteRequest) (*RequestVoteResponse, error)
 	mustEmbedUnimplementedRaftServiceServer()
 }
@@ -85,8 +83,8 @@ type RaftServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedRaftServiceServer struct{}
 
-func (UnimplementedRaftServiceServer) Ping(context.Context, *PingRequest) (*PingResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method Ping not implemented")
+func (UnimplementedRaftServiceServer) AppendEntries(context.Context, *AppendEntriesRequest) (*AppendEntriesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AppendEntries not implemented")
 }
 func (UnimplementedRaftServiceServer) RequestVote(context.Context, *RequestVoteRequest) (*RequestVoteResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RequestVote not implemented")
@@ -112,20 +110,20 @@ func RegisterRaftServiceServer(s grpc.ServiceRegistrar, srv RaftServiceServer) {
 	s.RegisterService(&RaftService_ServiceDesc, srv)
 }
 
-func _RaftService_Ping_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(PingRequest)
+func _RaftService_AppendEntries_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppendEntriesRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(RaftServiceServer).Ping(ctx, in)
+		return srv.(RaftServiceServer).AppendEntries(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: RaftService_Ping_FullMethodName,
+		FullMethod: RaftService_AppendEntries_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(RaftServiceServer).Ping(ctx, req.(*PingRequest))
+		return srv.(RaftServiceServer).AppendEntries(ctx, req.(*AppendEntriesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -156,8 +154,8 @@ var RaftService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*RaftServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "Ping",
-			Handler:    _RaftService_Ping_Handler,
+			MethodName: "AppendEntries",
+			Handler:    _RaftService_AppendEntries_Handler,
 		},
 		{
 			MethodName: "RequestVote",

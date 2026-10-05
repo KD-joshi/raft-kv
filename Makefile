@@ -31,13 +31,25 @@ run: build  ## Build and run a single node on port 8080
 	./$(BINARY) --id=node1 --port=8080 --data-dir=$(DATA_DIR)/node1
 
 run-node1: build  ## Run node1 on port 8001
-	./$(BINARY) --id=node1 --port=8001 --grpc-port=9001 --peers=node2:9002,node3:9003 --data-dir=$(DATA_DIR)/node1
+	./$(BINARY) --id=node1 --port=8001 --grpc-port=9001 \
+		--peers=localhost:9002,localhost:9003 \
+		--peer-ids=node2,node3 \
+		--peer-http=localhost:8002,localhost:8003 \
+		--data-dir=$(DATA_DIR)/node1
 
 run-node2: build  ## Run node2 on port 8002
-	./$(BINARY) --id=node2 --port=8002 --grpc-port=9002 --peers=node1:9001,node3:9003 --data-dir=$(DATA_DIR)/node2
+	./$(BINARY) --id=node2 --port=8002 --grpc-port=9002 \
+		--peers=localhost:9001,localhost:9003 \
+		--peer-ids=node1,node3 \
+		--peer-http=localhost:8001,localhost:8003 \
+		--data-dir=$(DATA_DIR)/node2
 
 run-node3: build  ## Run node3 on port 8003
-	./$(BINARY) --id=node3 --port=8003 --grpc-port=9003 --peers=node1:9001,node2:9002 --data-dir=$(DATA_DIR)/node3
+	./$(BINARY) --id=node3 --port=8003 --grpc-port=9003 \
+		--peers=localhost:9001,localhost:9002 \
+		--peer-ids=node1,node2 \
+		--peer-http=localhost:8001,localhost:8002 \
+		--data-dir=$(DATA_DIR)/node3
 
 # ── Test ─────────────────────────────────────────────────────
 

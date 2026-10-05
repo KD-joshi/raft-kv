@@ -4,23 +4,42 @@ package raft;
 
 option go_package = "github.com/KD-joshi/raft-kv/proto/raft";
 
-// ── Phase 2: Simple RPC Networking ──
+// ── Log Entry ──
 
-// PingRequest is a simple heartbeat message sent between nodes.
-message PingRequest {
-  string sender_id = 1; // ID of the node sending the ping (e.g., "node1")
+// LogEntry is a single entry in the replicated log.
+message LogEntry {
+  uint64 term = 1;     // The term when entry was received by leader
+  uint64 index = 2;    // Position in the log (1-indexed)
+  bytes  command = 3;  // Serialized kvstore.Command (JSON bytes)
 }
 
-// PingResponse is the acknowledgment.
-message PingResponse {
-  string receiver_id = 1; // ID of the node replying (e.g., "node2")
-  bool success = 2;       // Always true for now
+// ── AppendEntries (Heartbeat + Log Replication) ──
+
+// AppendEntriesRequest is sent by the leader to replicate log entries
+// and to serve as heartbeats (when entries is empty).
+message AppendEntriesRequest {
+  uint64 term = 1;              // Leader's term
+  string leader_id = 2;         // So followers can redirect clients
+  uint64 prev_log_index = 3;    // Index of log entry immediately preceding new ones
+  uint64 prev_log_term = 4;     // Term of prevLogIndex entry
+  repeated LogEntry entries = 5; // Log entries to store (empty for heartbeat)
+  uint64 leader_commit = 6;     // Leader's commitIndex
 }
+
+// AppendEntriesResponse is sent by followers back to the leader.
+message AppendEntriesResponse {
+  uint64 term = 1;      // Current term, for leader to update itself
+  bool success = 2;     // True if follower contained entry matching prevLogIndex/prevLogTerm
+}
+
+// ── RequestVote (Leader Election) ──
 
 // RequestVoteRequest is sent by Candidates to gather votes.
 message RequestVoteRequest {
-  uint64 term = 1;          // Candidate's term
-  string candidate_id = 2;  // Candidate requesting vote
+  uint64 term = 1;              // Candidate's term
+  string candidate_id = 2;      // Candidate requesting vote
+  uint64 last_log_index = 3;    // Index of candidate's last log entry
+  uint64 last_log_term = 4;     // Term of candidate's last log entry
 }
 
 // RequestVoteResponse is sent by nodes in response to a vote request.
@@ -29,12 +48,13 @@ message RequestVoteResponse {
   bool vote_granted = 2;    // True means candidate received vote
 }
 
+// ── RaftService ──
+
 // RaftService defines the RPCs that nodes use to communicate.
 service RaftService {
-  // Ping is a simple heartbeat to prove connectivity (Phase 2).
-  // In Phase 4, we will replace this with the true AppendEntries RPC.
-  rpc Ping (PingRequest) returns (PingResponse);
+  // AppendEntries replicates log entries and serves as heartbeat.
+  rpc AppendEntries (AppendEntriesRequest) returns (AppendEntriesResponse);
 
-  // RequestVote is sent by candidates to gather votes (Phase 3).
+  // RequestVote is sent by candidates to gather votes.
   rpc RequestVote (RequestVoteRequest) returns (RequestVoteResponse);
 }
